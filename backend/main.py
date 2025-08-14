@@ -1,5 +1,6 @@
 import oracledb
 import os
+from typing import Optional
 from fastapi import FastAPI, HTTPException
 from contextlib import asynccontextmanager
 from dotenv import load_dotenv
@@ -55,10 +56,13 @@ app = FastAPI(
 def read_root():
     return {"message": "Welcome to the HR Admin Dashboard API"}
 
+from typing import Optional
+
 @app.get("/api/employees")
-async def get_employees():
+async def get_employees(search: Optional[str] = None, page: int = 1, limit: int = 10):
     """
-    Retrieves the list of employees from the Oracle database.
+    Retrieves a paginated list of employees from the Oracle database.
+    Optionally filters the list based on a search term.
     """
     if not pool:
         raise HTTPException(status_code=500, detail="Database connection is not available.")
@@ -66,22 +70,42 @@ async def get_employees():
     try:
         with pool.acquire() as connection:
             cursor = connection.cursor()
-            # Select only a few columns for brevity and limit rows
-            cursor.execute("SELECT employee_id, first_name, last_name, email, hire_date, job_id, salary FROM employees FETCH FIRST 20 ROWS ONLY")
+
+            # --- Get total count for pagination ---
+            count_sql = "SELECT COUNT(*) FROM employees"
+            count_binds = {}
+            if search:
+                count_sql += " WHERE LOWER(first_name) LIKE :search_term OR LOWER(last_name) LIKE :search_term OR LOWER(email) LIKE :search_term"
+                count_binds['search_term'] = f"%{search.lower()}%"
             
-            # Fetch column names from the cursor description
+            cursor.execute(count_sql, count_binds)
+            total_count = cursor.fetchone()[0]
+
+            # --- Get paginated results ---
+            offset = (page - 1) * limit
+            sql_query = "SELECT employee_id, first_name, last_name, email, hire_date, job_id, salary FROM employees"
+            binds = {}
+
+            if search:
+                sql_query += " WHERE LOWER(first_name) LIKE :search_term OR LOWER(last_name) LIKE :search_term OR LOWER(email) LIKE :search_term"
+                binds['search_term'] = f"%{search.lower()}%"
+            
+            sql_query += " ORDER BY employee_id OFFSET :offset ROWS FETCH NEXT :limit ROWS ONLY"
+            binds['offset'] = offset
+            binds['limit'] = limit
+
+            cursor.execute(sql_query, binds)
+            
             columns = [col[0].lower() for col in cursor.description]
-            
-            # Fetch all rows and create a list of dictionaries
             employees = []
             for row in cursor.fetchall():
                 emp_dict = dict(zip(columns, row))
-                # Convert datetime objects to string
                 if 'hire_date' in emp_dict and isinstance(emp_dict['hire_date'], datetime):
                     emp_dict['hire_date'] = emp_dict['hire_date'].strftime('%Y-%m-%d')
                 employees.append(emp_dict)
 
-            return employees
+            return {"total_count": total_count, "employees": employees}
+
     except oracledb.Error as e:
         print(f"Error while fetching employees: {e}")
         raise HTTPException(status_code=500, detail=f"Error fetching data from the database: {e}")
