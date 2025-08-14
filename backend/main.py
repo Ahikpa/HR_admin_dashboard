@@ -59,13 +59,19 @@ def read_root():
 from typing import Optional
 
 @app.get("/api/employees")
-async def get_employees(search: Optional[str] = None, page: int = 1, limit: int = 10):
+async def get_employees(search: Optional[str] = None, page: int = 1, limit: int = 10, sort_by: str = 'employee_id', sort_order: str = 'asc'):
     """
-    Retrieves a paginated list of employees from the Oracle database.
-    Optionally filters the list based on a search term.
+    Retrieves a paginated and sorted list of employees.
     """
     if not pool:
         raise HTTPException(status_code=500, detail="Database connection is not available.")
+
+    # Whitelist for security
+    allowed_sort_columns = ['employee_id', 'first_name', 'last_name', 'email', 'hire_date', 'job_id', 'salary']
+    if sort_by not in allowed_sort_columns:
+        sort_by = 'employee_id' # Default sort column
+    if sort_order.lower() not in ['asc', 'desc']:
+        sort_order = 'asc' # Default sort order
 
     try:
         with pool.acquire() as connection:
@@ -81,16 +87,19 @@ async def get_employees(search: Optional[str] = None, page: int = 1, limit: int 
             cursor.execute(count_sql, count_binds)
             total_count = cursor.fetchone()[0]
 
-            # --- Get paginated results ---
+            # --- Get paginated and sorted results ---
             offset = (page - 1) * limit
-            sql_query = "SELECT employee_id, first_name, last_name, email, hire_date, job_id, salary FROM employees"
+            sql_query = f"SELECT employee_id, first_name, last_name, email, hire_date, job_id, salary FROM employees"
             binds = {}
 
             if search:
                 sql_query += " WHERE LOWER(first_name) LIKE :search_term OR LOWER(last_name) LIKE :search_term OR LOWER(email) LIKE :search_term"
                 binds['search_term'] = f"%{search.lower()}%"
             
-            sql_query += " ORDER BY employee_id OFFSET :offset ROWS FETCH NEXT :limit ROWS ONLY"
+            # Safely add ORDER BY clause
+            sql_query += f" ORDER BY {sort_by} {sort_order.upper()}"
+            
+            sql_query += " OFFSET :offset ROWS FETCH NEXT :limit ROWS ONLY"
             binds['offset'] = offset
             binds['limit'] = limit
 
