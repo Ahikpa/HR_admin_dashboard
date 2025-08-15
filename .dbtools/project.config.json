@@ -4,8 +4,8 @@
     "connectionName" : "app_user",
     "version" : "25.2.2.0"
   },
-  "schemas" : [ ],
-  "lastReleaseVersion" : "1.2",
+  "schemas" : [ "APP_USER" ],
+  "lastReleaseVersion" : "1.0",
   "export" : {
     "format" : {
       "enable" : true
